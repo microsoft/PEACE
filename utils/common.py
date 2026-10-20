@@ -40,7 +40,7 @@ def polish_lonlat(degree_str):
 def convert_to_decimal(degree_str):
     match = re.match(r"(\d+)°(\d+)'[(\d+)(\"|'+)]*([NSWE])", degree_str.strip())
     if not match:
-        print(f"Invalid format: {degree_str}")
+        raise ValueError("Invalid coordinate format.")
 
     degrees = int(match.group(1))
     minutes = int(match.group(2))
