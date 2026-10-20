@@ -1,5 +1,6 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 
+import re
 from io import BytesIO
 from pathlib import Path
 from typing import Any, List, Tuple, Union
@@ -174,10 +175,10 @@ class Explorer:
         self, query: str, return_type: str = "pandas"
     ) -> Union[DataFrame, Any, None]:  # pandas.dataframe or pyarrow.Table
         """
-        Run a SQL-Like query on the table. Utilizes LanceDB predicate pushdown.
+        Run a single SELECT query on the table with external access disabled.
 
         Args:
-            query (str): SQL query to run.
+            query (str): A single SELECT query or WHERE clause to run against the table.
             return_type (str): Type of the result to return. Can be either 'pandas' or 'arrow'. Defaults to 'pandas'.
 
         Returns:
@@ -201,20 +202,24 @@ class Explorer:
             raise ValueError("Table is not created. Please create the table first.")
 
         # Note: using filter pushdown would be a better long term solution. Temporarily using duckdb for this.
-        table = self.table.to_arrow()  # noqa NOTE: Don't comment this. This line is used by DuckDB
-        if not query.startswith("SELECT") and not query.startswith("WHERE"):
+        keyword = re.match(r"^\s*(SELECT|WHERE)\b", query, flags=re.IGNORECASE)
+        if keyword is None:
             raise ValueError(
                 f"Query must start with SELECT or WHERE. You can either pass the entire query or just the WHERE clause. found {query}"
             )
-        if query.startswith("WHERE"):
+        if keyword.group(1).upper() == "WHERE":
             query = f"SELECT * FROM 'table' {query}"
         LOGGER.info(f"Running query: {query}")
 
-        rs = duckdb.sql(query)
-        if return_type == "arrow":
-            return rs.arrow()
-        elif return_type == "pandas":
-            return rs.df()
+        # Isolate each query and prevent file/network access, extension loading and replacement scans.
+        with duckdb.connect(database=":memory:", config={"enable_external_access": "false"}) as connection:
+            table = connection.from_arrow(self.table.to_arrow())
+            # Relation.query rejects multiple statements before executing any of them, unlike connection.sql.
+            rs = table.query("table", query)
+            if return_type == "arrow":
+                return rs.arrow()
+            elif return_type == "pandas":
+                return rs.df()
 
     def plot_sql_query(self, query: str, labels: bool = True) -> Image.Image:
         """
