@@ -13,6 +13,7 @@ deep-translator==1.11.4
 opencv-python==4.10.0.84
 earthengine-api==1.1.1
 paddleocr==2.9.1
-torchvision==0.15.2
+torch==2.6.0
+torchvision==0.21.0
 psutil==6.0.0
 httpx==0.27.0

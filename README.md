@@ -98,11 +98,16 @@ unzip models.zip -d dependencies</code>
 </div>
 
 <ul><li>Step4: Install dependencies</li></ul>
+Use a Python 3.11 environment. Install the pinned PyTorch and torchvision versions together; older torchvision releases can install an older PyTorch without the <code>torch.compiler</code> API required by Transformers.
 <div class="language-plaintext highlighter-rouge">
 <pre class="highlight">
-<code>pip install -r requirements.txt</code>
+<code>python -m pip install --upgrade -r requirements.txt
+python -m pip check
+python -c "import torch, torchvision; from transformers.integrations import integration_utils; from sentence_transformers import util; print(torch.__version__, torchvision.__version__)"</code>
 </pre>
 </div>
+
+The layout detectors load full-model PyTorch checkpoints. Only use model files from trusted sources, such as the Step3 download; loading an untrusted checkpoint can execute arbitrary code.
 
 <ul><li>Step5: Configure LLMs API endpoint and key in utils/api.py</li></ul>
 
