@@ -1,19 +1,24 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 
 import glob
+import ipaddress
 import math
 import os
+import socket
 import time
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from threading import Thread
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import cv2
 import numpy as np
 import requests
 import torch
 from PIL import Image
+from urllib3 import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.util import Timeout
 
 from ultralytics.data.utils import IMG_FORMATS, VID_FORMATS
 from ultralytics.utils import LOGGER, is_colab, is_kaggle, ops
@@ -502,12 +507,77 @@ class LoadTensor:
         return self.bs
 
 
+def _load_remote_image(url):
+    """Load an HTTP(S) image using only validated public IPs, including across redirects."""
+    for redirect_count in range(6):
+        if any(ord(char) < 32 or ord(char) == 127 for char in url):
+            raise ValueError("Image URLs must not contain control characters")
+        if urlparse(url).port == 0:
+            raise ValueError("Image URLs must use a valid port")
+        request = requests.Request("GET", url).prepare()
+        parsed = urlparse(request.url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or "%" in parsed.hostname
+        ):
+            raise ValueError("Image URLs must use HTTP(S) with a hostname and no credentials or IPv6 zone ID")
+        port = parsed.port if parsed.port is not None else (443 if parsed.scheme == "https" else 80)
+        addresses = [info[4][0] for info in socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)]
+        if not addresses:
+            raise ValueError("Image URL hostname did not resolve to a public IP address")
+        for address in addresses:
+            ip = ipaddress.ip_address(address)
+            if (
+                not ip.is_global
+                or ip.is_multicast
+                or ip.is_reserved
+                or (isinstance(ip, ipaddress.IPv6Address) and (ip.sixtofour is not None or ip.teredo is not None))
+            ):
+                raise ValueError("Image URLs must resolve only to public IP addresses")
+
+        # Pin the connection to the checked IP to prevent DNS rebinding. Direct pools also bypass env proxies.
+        pool_type, tls = HTTPConnectionPool, {}
+        if parsed.scheme == "https":
+            pool_type = HTTPSConnectionPool
+            tls = {
+                "cert_reqs": "CERT_REQUIRED",
+                "ca_certs": requests.certs.where(),
+                "assert_hostname": parsed.hostname,
+                "server_hostname": parsed.hostname,
+            }
+        with pool_type(addresses[0], port=port, **tls) as pool:
+            with pool.urlopen(
+                "GET",
+                request.path_url,
+                headers={"Host": parsed.netloc},
+                redirect=False,
+                retries=False,
+                preload_content=False,
+                timeout=Timeout(connect=5, read=10),
+            ) as response:
+                if response.status in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("Location")
+                    if not location or redirect_count == 5:
+                        raise ValueError("Image URL has an invalid redirect or too many redirects")
+                    url = urljoin(request.url, location)
+                    continue
+                if response.status != 200:
+                    raise requests.HTTPError(f"Image download failed with HTTP status {response.status}")
+                image = Image.open(BytesIO(response.read()))
+                image.load()
+                return image
+
+
 def autocast_list(source):
     """Merges a list of source of different types into a list of numpy arrays or PIL images."""
     files = []
     for im in source:
         if isinstance(im, (str, Path)):  # filename or uri
-            files.append(Image.open(requests.get(im, stream=True).raw if str(im).startswith("http") else im))
+            is_url = isinstance(im, str) and ("://" in im or im.lower().startswith(("http:", "https:", "//")))
+            files.append(_load_remote_image(im) if is_url else Image.open(im))
         elif isinstance(im, (Image.Image, np.ndarray)):  # PIL or np Image
             files.append(im)
         else:
