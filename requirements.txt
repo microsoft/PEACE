@@ -8,7 +8,7 @@ pillow==12.2.0
 openai==1.45.0
 azure-identity==1.17.1
 transformers==5.0.0rc3
-sentence_transformers==3.1.1
+sentence_transformers==5.6.0
 deep-translator==1.11.4
 opencv-python==4.10.0.84
 earthengine-api==1.1.1
