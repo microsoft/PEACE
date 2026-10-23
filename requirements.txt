@@ -4,7 +4,7 @@ numpy==1.26.4
 tqdm==4.66.5
 shapely==2.0.6
 matplotlib==3.9.2
-pillow==12.3.0
+pillow==13.0.0
 openai==1.45.0
 azure-identity==1.17.1
 transformers==5.10.1
